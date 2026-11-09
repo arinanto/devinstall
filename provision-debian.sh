@@ -60,8 +60,8 @@
 #
 #   The locale and timezone override (Asia/Jakarta, LANG=C.UTF-8)
 #       Both are chosen during the install and are about this machine's
-#       location, not about tooling. C.UTF-8 is Debian's default anyway, so
-#       the package list still installs `locales` and changes nothing else.
+#       location, not about tooling. C.UTF-8 is Debian's default anyway, so this
+#       script generates no locale and sets no LANG.
 #
 #   `apt-get upgrade`
 #       Patching a real machine -- possibly a kernel -- is the operator's
@@ -93,36 +93,32 @@ set -e
 set -u
 set -o pipefail
 
-# The package set from the Containerfile, minus the container-only entries and
-# the two SSH packages explained above. Kept in the image's order so the two can
-# be diffed.
+# The Containerfile's development packages, minus everything a Debian install
+# already has, so that a run on a configured machine is not a list of no-ops.
+# Dropped from the image's list:
+#   systemd, systemd-sysv, dbus          -- the base system
+#   openssh-server, openssh-client       -- the installer's SSH task
+#   ca-certificates, procps, iproute2, iputils-ping, lsof, netcat-openbsd,
+#   man-db, file, perl, bash-completion, bind9-dnsutils, wget, locales
+#                                        -- Priority standard or higher, i.e.
+#                                           part of the standard task
+#   python3                              -- in the standard live task, and a
+#                                           dependency of python3-pil below
+# `sudo` is not listed either: _preflight refuses to start without it, so an
+# install line for it could never do anything. Order follows the image so the
+# two can be diffed.
 APT_PACKAGES=(
-  ca-certificates
-  sudo
-  procps
-  iproute2
-  iputils-ping
-  lsof
-  netcat-openbsd
   tmux
-  man-db
   unzip
-  file
-  python3
   python3-pil
-  perl
-  bash-completion
   build-essential
-  bind9-dnsutils
   git
   curl
-  wget
   vim
   jq
   fd-find
   ripgrep
   imagemagick
-  locales
 )
 
 # Where the three installers put themselves, at their defaults: fnm under

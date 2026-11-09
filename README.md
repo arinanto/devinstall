@@ -31,16 +31,24 @@ selected during the install. Nothing here is container-aware.
 
 ### 1. Packages
 
-The 26 packages from the fakevm image's list that are development tooling. The
-image's other five — `systemd`, `systemd-sysv`, `dbus`, `openssh-server`,
-`openssh-client` — are already on a Debian install, so they are not listed here.
+The 11 packages from the fakevm image's list that a Debian install does not
+already provide:
 
 ```
-ca-certificates sudo procps iproute2 iputils-ping lsof netcat-openbsd
-tmux man-db unzip file python3 python3-pil perl bash-completion
-build-essential bind9-dnsutils git curl wget vim jq fd-find ripgrep
-imagemagick locales
+tmux unzip python3-pil build-essential git curl vim jq fd-find ripgrep
+imagemagick
 ```
+
+The rest of the image's list repeats what is already there, so it is not carried
+over:
+
+| Left out | Why |
+|---|---|
+| `systemd`, `systemd-sysv`, `dbus` | The base system. The image needs them only because a base image is not bootable. |
+| `openssh-server`, `openssh-client` | The Debian installer's SSH task. `openssh-client` is in the standard task as well. |
+| `ca-certificates`, `procps`, `iproute2`, `iputils-ping`, `lsof`, `netcat-openbsd`, `man-db`, `file`, `perl`, `bash-completion`, `bind9-dnsutils`, `wget`, `locales` | `Priority: standard` or higher, so they arrive with the standard system utilities task. |
+| `python3` | In the standard task on a live install, and a dependency of `python3-pil` in any case. |
+| `sudo` | Required before anything can be installed at all, so an `apt` line for it could never do anything. `_preflight` stops with an error when it is missing. |
 
 Debian ships `fd` as `fdfind` (the name `fd` belongs to an older package), so the
 script links `~/.local/bin/fd` at it. In the home directory, not `/usr/local/bin`:
