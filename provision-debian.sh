@@ -17,6 +17,7 @@
 # afterwards for PATH.
 #
 #   ./provision-debian.sh
+#   ./provision-debian.sh --force
 #   ./provision-debian.sh --help
 #
 # ---------------------------------------------------------------------------
@@ -94,8 +95,9 @@
 #       deliberately laid over an existing one, and it skips nothing else.
 #
 # What IS kept: the package list verbatim (minus the container-only entries
-# above), `fd` under its own name, and the same devkit installers in the same
-# order with the same post-install sanity check.
+# above), `fd` under its own name, the same devkit installers in the same order
+# with the same post-install sanity check -- pi being the one installer swapped,
+# as described above.
 # ---------------------------------------------------------------------------
 
 set -e
@@ -267,8 +269,8 @@ _require_clean_home() {
     printf '         %s\n' "$marker" >&2
   done
   printf '\n' >&2
-  printf '       It provisions a home with none of this in it yet. Remove the\n' >&2
-  printf '       paths above to finish or redo a run, or use a fresh account.\n' >&2
+  printf '       It provisions a home with none of this in it yet. Remove or undo\n' >&2
+  printf '       the entries above to finish or redo a run, or use a fresh account.\n' >&2
   exit 1
 }
 

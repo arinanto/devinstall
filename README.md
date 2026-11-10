@@ -84,11 +84,13 @@ pins the result, and the extensions afterwards are `pi install`, not npm. That
 installer asks its questions on `/dev/tty` — never stdin, so nothing can be piped
 at it — and has no non-interactive flag, so the script gives it no controlling
 terminal at all with `setsid -w`. Every prompt then finds no tty and a
-non-interactive run cannot hang on one: the action menu takes its default (`install`,
-or `reinstall` on a machine that already has the managed one), the PATH-line and
-`Start pi now?` offers are skipped rather than defaulted, and a missing Node is an
-error rather than a question. That last offer matters: answering yes to it execs pi
-over the script and the extensions and version check would never run.
+non-interactive run cannot hang on one: the action menu takes its default
+(`install`, or `reinstall` under `--force` on a machine that already has the
+managed one), the PATH-line and `Start pi now?` offers are skipped rather than
+defaulted, and a missing Node is an error rather than a question. That last offer
+is why the installer gets no terminal rather than a piped answer: if it were
+reached, yes would exec pi over the script, and the extensions and version check
+would never run.
 
 Its output goes to a temporary log instead of the terminal. The log is deleted when
 the whole run succeeds, and kept with its path printed when anything fails.
@@ -124,8 +126,8 @@ cd devinstall
 
 The script prints a `==>` line per step and a version table at the end. It asks
 for the sudo password once, at the start, rather than in the middle of a wall of
-apt output. Expect a few minutes; most of it is the package install and the Node
-LTS download.
+apt output. Expect a few minutes: the package install, the Node LTS download, and
+pi's dependency install, which runs silently and prints the path of its log first.
 
 Then open a new login shell:
 
@@ -162,8 +164,8 @@ error: this home already has what the script installs:
          /home/you/.local/bin/pi
          /home/you/.bashrc: PNPM_HOME
 
-       It provisions a home with none of this in it yet. Remove the
-       paths above to finish or redo a run, or use a fresh account.
+       It provisions a home with none of this in it yet. Remove or undo
+       the entries above to finish or redo a run, or use a fresh account.
 ```
 
 Checked paths are `~/.local/share/{fnm,pnpm,pi-node}`, `~/.config/uv`,
@@ -173,8 +175,9 @@ Checked paths are `~/.local/share/{fnm,pnpm,pi-node}`, `~/.config/uv`,
 `~/.cache/uv` — because they are not components. apt is not checked either:
 reinstalling packages that are already there is a no-op.
 
-So a half-finished run is finished by removing what the message lists, not by
-deleting a marker file that could drift out of step with the home it describes.
+So a half-finished run is finished by removing or undoing what the message lists,
+not by deleting a marker file that could drift out of step with the home it
+describes.
 
 `--force` (`-f`) is the way past that, and prints the same list as a warning
 first. What it lets through: the installers re-run over their old directories,
