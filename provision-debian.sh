@@ -72,9 +72,9 @@
 #       by default: each appends its own block to the shell config where it
 #       wants one, uv writes ~/.local/bin/env, and none of their settings are
 #       redirected, so there is no .npmrc, no uv.toml and no pnpm rc file that
-#       this script chose. The consequence, accepted deliberately: re-running
-#       the script appends fnm's and pnpm's shell blocks a second time, because
-#       that is what re-running those installers does.
+#       this script chose. Those blocks are also why _require_clean_home reads
+#       the shell config and not just the directories: they are what a second
+#       run would duplicate.
 #
 #   The image's `npm install -g --ignore-scripts` line for pi
 #       Pi's own installer replaces it: pi.dev/install.sh pins every dependency
@@ -86,9 +86,12 @@
 #       deleted when the whole run succeeds and kept when anything fails.
 #
 #   setupdevkits.sh's first-run flag
-#       That flag protects a container home that is thrown away and rebuilt
-#       from an image. Here it would turn a half-finished run into a dead end,
-#       so the script can simply be run again.
+#       Not copied as a marker file. The same "provision once" guarantee comes
+#       from reading the home instead: _require_clean_home runs first and
+#       refuses to start when anything this script would install is already
+#       there, naming each path. A marker file and the home can disagree; the
+#       home cannot disagree with itself. --force is the way past it, for a run
+#       deliberately laid over an existing one, and it skips nothing else.
 #
 # What IS kept: the package list verbatim (minus the container-only entries
 # above), `fd` under its own name, and the same devkit installers in the same
@@ -141,10 +144,33 @@ FNM_PATH="$HOME/.local/share/fnm"
 PNPM_BIN="$HOME/.local/share/pnpm/bin"
 LOCAL_BIN="$HOME/.local/bin"
 
+# Set by --force. Scoped to _require_clean_home: it does not touch the root,
+# apt, setsid or sudo checks in _preflight, and does not skip any package.
+FORCE=0
+
 # Set by _install_pi. pi's installer writes its progress here instead of the
 # terminal, and the log is deleted if the whole run succeeds; _cleanup_pi_log
 # keeps it and names it when anything fails.
 PI_INSTALL_LOG=""
+
+# Everything in $HOME that the steps below create, for _require_clean_home.
+# Caches npm and pnpm fill in (~/.npm, ~/.cache/pnpm, ~/.cache/uv) are left out
+# on purpose: they are not components, and refusing over a cache would be noise.
+HOME_MARKERS=(
+  "$FNM_PATH"
+  "$HOME/.local/share/pnpm"
+  "$HOME/.local/share/pi-node"
+  "$HOME/.config/uv"
+  "$LOCAL_BIN/uv"
+  "$LOCAL_BIN/uvx"
+  "$LOCAL_BIN/pi"
+  "$LOCAL_BIN/fd"
+  "$HOME/.pi"
+)
+
+# The shell blocks the installers append, which a second run would duplicate.
+SHELL_FILES=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
+SHELL_MARKER_PATTERNS=("# fnm" "PNPM_HOME" ".local/bin/env")
 
 # check to see if this file is being run or sourced from another script
 _is_sourced() {
@@ -156,7 +182,7 @@ _is_sourced() {
 
 _usage() {
   cat <<'EOF'
-usage: provision-debian.sh [-h]
+usage: provision-debian.sh [-f] [-h]
 
 Install the fakevm's tooling on a real Debian machine: the Containerfile's
 packages, then fnm + node LTS, pnpm, uv and pi in the calling user's home.
@@ -164,6 +190,15 @@ packages, then fnm + node LTS, pnpm, uv and pi in the calling user's home.
 Needs sudo for the packages only; nothing on the machine is reconfigured and
 no service is enabled. Run it as a normal user, not as root.
 
+It provisions a home that has nothing in it yet, and refuses to start when any
+of those components, or the shell blocks their installers wrote, are already
+there. It names what it found.
+
+  -f, --force  continue anyway, over what that check found. Installers re-run
+               over their old directories, and the shell blocks they append
+               are appended a second time. Nothing else is skipped: root,
+               apt, setsid and sudo are still required, and packages are
+               still installed.
   -h, --help   this text
 EOF
 }
@@ -174,6 +209,9 @@ _parsing_args() {
       -h|--help)
         _usage
         exit 0
+        ;;
+      -f|--force)
+        FORCE=1
         ;;
       *)
         printf 'error: unknown argument %s\n\n' "$1" >&2
@@ -187,6 +225,51 @@ _parsing_args() {
 
 _have() {
   command -v "$1" >/dev/null 2>&1
+}
+
+# The script provisions a home, not a home that has already been provisioned.
+# Everything it would create is looked for before anything is touched, so a
+# second run over its own leftovers is refused rather than silently layered on
+# top of them.
+_require_clean_home() {
+  local found=() marker file pattern
+
+  for marker in "${HOME_MARKERS[@]}"; do
+    if [[ -e $marker || -L $marker ]]; then
+      found+=("$marker")
+    fi
+  done
+
+  for file in "${SHELL_FILES[@]}"; do
+    [[ -f $file ]] || continue
+    for pattern in "${SHELL_MARKER_PATTERNS[@]}"; do
+      if grep -Fq -- "$pattern" "$file"; then
+        found+=("$file: $pattern")
+      fi
+    done
+  done
+
+  if ((${#found[@]} == 0)); then
+    return 0
+  fi
+
+  if ((FORCE)); then
+    printf 'warning: --force given; continuing over an existing install:\n' >&2
+    for marker in "${found[@]}"; do
+      printf '         %s\n' "$marker" >&2
+    done
+    printf '\n' >&2
+    return 0
+  fi
+
+  printf 'error: this home already has what the script installs:\n' >&2
+  for marker in "${found[@]}"; do
+    printf '         %s\n' "$marker" >&2
+  done
+  printf '\n' >&2
+  printf '       It provisions a home with none of this in it yet. Remove the\n' >&2
+  printf '       paths above to finish or redo a run, or use a fresh account.\n' >&2
+  exit 1
 }
 
 _preflight() {
@@ -376,6 +459,11 @@ _verify() {
 
 _main() {
   _parsing_args "$@"
+
+  # First, before _preflight and before anything is installed: a home that
+  # already holds these is not one this script can provision.
+  _require_clean_home
+
   # In _main, not at the top of the file, so that sourcing this does not install
   # a trap in the caller's shell.
   trap _cleanup_pi_log EXIT

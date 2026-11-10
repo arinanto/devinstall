@@ -102,6 +102,10 @@ the whole run succeeds, and kept with its path printed when anything fails.
 - A normal user account in the `sudo` group. The script installs packages through
   `sudo` and everything else into `$HOME`, so it refuses to run as root — root's
   home is the wrong home.
+- A home directory it has not provisioned yet. `_require_clean_home` runs before
+  anything else, including the sudo prompt, and stops with the list of what it
+  found if fnm, pnpm, uv, pi or the `fd` link are already installed there.
+  `--force` continues anyway.
 - Network access: apt, plus four installer scripts and the npm registry.
 - A login shell afterwards. PATH comes from the config the installers write, which
   a non-interactive script never reads; the script assembles its own PATH for the
@@ -143,22 +147,41 @@ than install tools. None of the following is copied here:
 | Creating users, sudoers, locale, timezone | The machine already has an identity and a location; the fakevm's `devuser` with a known password and passwordless sudo would be a hole on a network-reachable box. |
 | Baked SSH host keys, `machine-id` pinning | Container build artefacts. On hardware they are the machine's own identity, and rewriting them breaks every client that already trusts it. |
 | The fakevm's skel copy, emoji prompt, `chmod 700 $HOME` | Those build a throwaway home from an image. A human's home directory is not rebuilt, and replacing its dotfiles is destructive. |
-| A first-run flag file | That flag protects a container home rebuilt from an image. Here it would only make a half-finished run unrecoverable. |
+| A first-run flag file | Not copied. The "provision once" guarantee comes from reading the home instead: the script refuses to start when its own components, or the shell blocks their installers wrote, are already there, and names what it found. `--force` overrides that, for a run deliberately laid over an existing home. |
 
 The whole of the script's footprint outside `$HOME` is the package installation.
 
 ## Re-running it
 
-Safe, with one visible consequence:
+It refuses. The first thing it does, before the sudo prompt and before any
+package, is look for everything it would install:
 
-- apt already has the packages → no-op.
-- `~/.local/bin/fd` exists → skipped, with a note.
-- The installers run again, and fnm's and pnpm's shell blocks get appended to
-  `~/.bashrc` a second time. That is what re-running those installers does; the
-  script does not fight it, because fighting it would mean overriding their
-  defaults. pi's installer finds the managed install it made last time and
-  reinstalls it without asking, because the menu it would normally show is never
-  reached.
+```
+error: this home already has what the script installs:
+         /home/you/.local/share/fnm
+         /home/you/.local/bin/pi
+         /home/you/.bashrc: PNPM_HOME
+
+       It provisions a home with none of this in it yet. Remove the
+       paths above to finish or redo a run, or use a fresh account.
+```
+
+Checked paths are `~/.local/share/{fnm,pnpm,pi-node}`, `~/.config/uv`,
+`~/.local/bin/{uv,uvx,pi,fd}` and `~/.pi`; checked shell blocks are `# fnm`,
+`PNPM_HOME` and `.local/bin/env`, in `~/.bashrc`, `~/.bash_profile` and
+`~/.profile`. Caches are deliberately not checked — `~/.npm`, `~/.cache/pnpm`,
+`~/.cache/uv` — because they are not components. apt is not checked either:
+reinstalling packages that are already there is a no-op.
+
+So a half-finished run is finished by removing what the message lists, not by
+deleting a marker file that could drift out of step with the home it describes.
+
+`--force` (`-f`) is the way past that, and prints the same list as a warning
+first. What it lets through: the installers re-run over their old directories,
+and fnm's and pnpm's shell blocks are appended to `~/.bashrc` a second time,
+because that is what re-running those installers does. What it does not skip is
+the rest of `_preflight` — root, apt, setsid and sudo are still required — or any
+package.
 
 ## Verifying an install
 
@@ -185,7 +208,8 @@ The script ends with its own check. A healthy run looks like this:
 Those are the versions on the trixie machine this was developed against; the
 script prints whatever is actually installed. Version numbers move — a `MISSING`
 line is the thing to look at. `--help` prints usage and exits without touching
-anything.
+anything, and `--force` continues past the clean-home check, printing what it
+found first.
 
 ## Repository layout
 
