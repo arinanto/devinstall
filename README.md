@@ -9,9 +9,11 @@ that installs the language toolchains. This repository reproduces that environme
 on a machine Debian installed itself on: a standard install, no desktop task, SSH
 selected during the install. Nothing here is container-aware.
 
-> Status: the package list and the three installers have been checked on Debian 13
-> (trixie); the script as a whole has not yet been run end to end on a machine
-> straight out of the installer.
+> Status: the package list and fnm, pnpm and uv's installers have been checked on
+> Debian 13 (trixie). pi's managed layout (`~/.pi/agent/install`, entrypoint
+> symlinked into `~/.local/bin`) is the one already in use there, but this script
+> has not yet run pi's installer itself, and the script as a whole has not been run
+> end to end on a machine straight out of the installer.
 
 ## Contents
 
@@ -70,15 +72,26 @@ Into the home directory of whoever runs the script:
 | Node.js | latest LTS, set as fnm's default | `~/.local/share/fnm/node-versions` |
 | pnpm | standalone installer (`pnpm setup`) | `~/.local/share/pnpm` |
 | uv | its own installer | `~/.local/bin` |
-| pi | `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` | fnm's global prefix |
+| pi | its own installer (`pi.dev/install.sh`), then `pi update` | `~/.pi/agent/install`, entrypoint linked into `~/.local/bin` |
 | pi extensions | `pi install npm:@xynogen/pix-gate`, `pi install npm:pi-web-access` | `~/.pi` |
 
 Every one of them runs at its own defaults. fnm appends its `# fnm` block to
 `~/.bashrc`, pnpm adds `PNPM_HOME` to it, uv writes `~/.local/bin/env` and sources
 it from the shell profile. This repository writes no shell config of its own and
 overrides none of their settings: no `.npmrc`, no `uv.toml`, no pnpm rc file. The
-one npm flag in the script, `--ignore-scripts`, is part of pi's documented install
-line rather than a setting made here.
+script runs no `npm` command of its own; pi's installer uses npm internally and
+pins the result, and the extensions afterwards are `pi install`, not npm. That
+installer asks its questions on `/dev/tty` — never stdin, so nothing can be piped
+at it — and has no non-interactive flag, so the script gives it no controlling
+terminal at all with `setsid -w`. Every prompt then finds no tty and a
+non-interactive run cannot hang on one: the action menu takes its default (`install`,
+or `reinstall` on a machine that already has the managed one), the PATH-line and
+`Start pi now?` offers are skipped rather than defaulted, and a missing Node is an
+error rather than a question. That last offer matters: answering yes to it execs pi
+over the script and the extensions and version check would never run.
+
+Its output goes to a temporary log instead of the terminal. The log is deleted when
+the whole run succeeds, and kept with its path printed when anything fails.
 
 ## Requirements
 
@@ -89,7 +102,7 @@ line rather than a setting made here.
 - A normal user account in the `sudo` group. The script installs packages through
   `sudo` and everything else into `$HOME`, so it refuses to run as root — root's
   home is the wrong home.
-- Network access: apt, plus three installer scripts and the npm registry.
+- Network access: apt, plus four installer scripts and the npm registry.
 - A login shell afterwards. PATH comes from the config the installers write, which
   a non-interactive script never reads; the script assembles its own PATH for the
   checks it runs at the end.
@@ -140,10 +153,12 @@ Safe, with one visible consequence:
 
 - apt already has the packages → no-op.
 - `~/.local/bin/fd` exists → skipped, with a note.
-- The three installers run again, and fnm's and pnpm's shell blocks get appended to
+- The installers run again, and fnm's and pnpm's shell blocks get appended to
   `~/.bashrc` a second time. That is what re-running those installers does; the
   script does not fight it, because fighting it would mean overriding their
-  defaults.
+  defaults. pi's installer finds the managed install it made last time and
+  reinstalls it without asking, because the menu it would normally show is never
+  reached.
 
 ## Verifying an install
 
@@ -188,11 +203,14 @@ only static check.
 
 - Run it against a machine you installed, not against a shared box: it installs
   packages and writes into one user's home.
-- It installs pi plus two extensions from npm, and pi is the agent that will then
-  run on that machine. The approval gate extension (`@xynogen/pix-gate`) is one of
-  them; its rules live in its own package, not here.
-- `--ignore-scripts` on the npm install follows pi's README. The pi extensions
-  are installed by `pi install`, which is not npm.
+- It installs pi and two extensions, and pi is the agent that will then run on
+  that machine. The approval gate extension (`@xynogen/pix-gate`) is one of them;
+  its rules live in its own package, not here.
+- pi comes from its own installer: it downloads a `package.json` and
+  `package-lock.json` from pi.dev, installs with `npm ci --ignore-scripts`, runs
+  the staged binary once to confirm it reports the expected version, and only then
+  activates it. `--ignore-scripts` therefore survives the switch, and the versions
+  are the ones pinned in that lockfile rather than whatever npm resolves today.
 
 ## Licence
 

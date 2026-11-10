@@ -68,16 +68,22 @@
 #       decision, not a side effect of installing tools. Run it yourself.
 #
 #   Overriding the installers' own configuration
-#       fnm, pnpm and uv are left to set themselves up exactly as they do by
-#       default: each appends its own block to the shell config, uv writes
-#       ~/.local/bin/env, and none of their settings are redirected, so there
-#       is no .npmrc, no uv.toml and no pnpm rc file that this script chose.
-#       npm is used only for pi, with the command pi's own README documents
-#       verbatim (`npm install -g --ignore-scripts ...`), so the lifecycle
-#       behaviour there is upstream's choice rather than a setting made here.
-#       The consequence, accepted deliberately: re-running the script appends
-#       fnm's and pnpm's shell blocks a second time, because that is what
-#       re-running those installers does.
+#       fnm, pnpm, uv and pi are left to set themselves up exactly as they do
+#       by default: each appends its own block to the shell config where it
+#       wants one, uv writes ~/.local/bin/env, and none of their settings are
+#       redirected, so there is no .npmrc, no uv.toml and no pnpm rc file that
+#       this script chose. The consequence, accepted deliberately: re-running
+#       the script appends fnm's and pnpm's shell blocks a second time, because
+#       that is what re-running those installers does.
+#
+#   The image's `npm install -g --ignore-scripts` line for pi
+#       Pi's own installer replaces it: pi.dev/install.sh pins every dependency
+#       and switches pi to `pi update` afterwards, where the npm line takes
+#       whatever npm resolves at the time. It asks its questions on /dev/tty and
+#       has no non-interactive flag, so it runs under `setsid -w` with no
+#       terminal: no prompt can block this run, and its "Start pi now?" cannot
+#       exec pi in place of this script. Its output goes to a temporary log,
+#       deleted when the whole run succeeds and kept when anything fails.
 #
 #   setupdevkits.sh's first-run flag
 #       That flag protects a container home that is thrown away and rebuilt
@@ -125,14 +131,20 @@ APT_PACKAGES=(
   python-is-python3
 )
 
-# Where the three installers put themselves, at their defaults: fnm under
+# Where the installers put themselves, at their defaults: fnm under
 # ~/.local/share/fnm, pnpm under ~/.local/share/pnpm with executables in its
-# bin/, uv in ~/.local/bin (which is also where the fd symlink below goes).
+# bin/, uv in ~/.local/bin (which is also where the fd symlink below goes), and
+# pi under ~/.pi/agent/install with its entrypoint symlinked into ~/.local/bin.
 # Only used to assemble PATH for this run's own checks; the installers add the
 # same directories to the shell config themselves.
 FNM_PATH="$HOME/.local/share/fnm"
 PNPM_BIN="$HOME/.local/share/pnpm/bin"
 LOCAL_BIN="$HOME/.local/bin"
+
+# Set by _install_pi. pi's installer writes its progress here instead of the
+# terminal, and the log is deleted if the whole run succeeds; _cleanup_pi_log
+# keeps it and names it when anything fails.
+PI_INSTALL_LOG=""
 
 # check to see if this file is being run or sourced from another script
 _is_sourced() {
@@ -207,6 +219,11 @@ _preflight() {
 
   if ! _have apt-get; then
     printf 'error: apt-get not found.\n' >&2
+    exit 1
+  fi
+  if ! _have setsid; then
+    printf "error: setsid not found; pi's installer is run without a terminal\n" >&2
+    printf '       so that it cannot wait for an answer.\n' >&2
     exit 1
   fi
   if ! _have sudo; then
@@ -291,13 +308,40 @@ _install_uv() {
 
 _install_pi() {
   printf '\n==> pi\n'
-  # pi's documented install line, verbatim -- README.md and docs/quickstart.md
-  # both use it with --ignore-scripts, and the package is built to work that
-  # way. This is the one npm invocation in the script, and it changes no npm
-  # setting: no .npmrc is written and npm's own defaults are otherwise intact.
-  npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+  # pi's documented install line, under its managed installer: it pins every
+  # dependency and updates with `pi update` from then on.
+  #
+  # That installer asks its questions on /dev/tty, not stdin, so it is given no
+  # controlling terminal at all: `setsid -w` detaches it, the prompts find no tty
+  # and the run cannot sit waiting for a keypress, and `-w` makes the exit
+  # status the installer's own. Two of those prompts make it necessary rather
+  # than tidy: the action menu would block, and "Start pi now?" would exec pi in
+  # place of this process, skipping the extensions and the check below.
+  #
+  # `bash -c` starts a fresh shell, so this script's `set -o pipefail` does not
+  # reach the pipeline inside it. Re-stating it there is what makes a failed
+  # curl fail: without it, sh reads an empty script and exits 0.
+  PI_INSTALL_LOG="$(mktemp "${TMPDIR:-/tmp}/pi-install.XXXXXX.log")"
+  printf 'installing without prompts; output in %s\n' "$PI_INSTALL_LOG"
+  if ! setsid -w bash -c 'set -o pipefail; curl -fsSL https://pi.dev/install.sh | sh' \
+      >"$PI_INSTALL_LOG" 2>&1; then
+    printf 'error: pi installer failed.\n' >&2
+    exit 1
+  fi
   pi install npm:@xynogen/pix-gate
   pi install npm:pi-web-access
+}
+
+_cleanup_pi_log() {
+  local status=$?
+  if [[ -z $PI_INSTALL_LOG ]] || [[ ! -f $PI_INSTALL_LOG ]]; then
+    return 0
+  fi
+  if [[ $status -eq 0 ]]; then
+    rm -f "$PI_INSTALL_LOG"
+    return 0
+  fi
+  printf '\npi installer output kept in:\n  %s\n' "$PI_INSTALL_LOG" >&2
 }
 
 _show_version() {
@@ -332,6 +376,9 @@ _verify() {
 
 _main() {
   _parsing_args "$@"
+  # In _main, not at the top of the file, so that sourcing this does not install
+  # a trap in the caller's shell.
+  trap _cleanup_pi_log EXIT
 
   _preflight
   _install_packages
