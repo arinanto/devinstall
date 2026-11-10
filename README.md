@@ -39,6 +39,12 @@ tmux unzip python3-pil build-essential git curl vim jq fd-find ripgrep
 imagemagick
 ```
 
+...plus two that are not in the image's list, added on request:
+
+```
+podman python-is-python3
+```
+
 The rest of the image's list repeats what is already there, so it is not carried
 over:
 

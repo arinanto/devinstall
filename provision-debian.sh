@@ -119,6 +119,10 @@ APT_PACKAGES=(
   fd-find
   ripgrep
   imagemagick
+  # Not in the image's list; added here on request, and kept after it so the
+  # block above still diffs cleanly against the Containerfile.
+  podman
+  python-is-python3
 )
 
 # Where the three installers put themselves, at their defaults: fnm under
